@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
+import Image from "next/image";
 import { Header } from "@/components/Header";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -12,9 +13,18 @@ import { useCareLogStore } from "@/lib/store";
 import { DOMAIN_LABEL } from "@/lib/domains";
 import { TONES } from "@/lib/tone";
 import { useSpeechToText } from "@/lib/useSpeechToText";
+import { compressImage } from "@/lib/compressImage";
 import type { Entry } from "@/lib/types";
 
 type Tab = "observation" | "parentMessage";
+
+function formatDate(ts: number) {
+  return new Date(ts).toLocaleDateString("ko-KR", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+}
 
 export default function NotePage() {
   const params = useParams<{ childId: string }>();
@@ -31,6 +41,7 @@ export default function NotePage() {
   const child = children.find((c) => c.id === childId);
 
   const [memo, setMemo] = useState("");
+  const [pendingImage, setPendingImage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [slow, setSlow] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -51,6 +62,18 @@ export default function NotePage() {
     }
     voiceBaseRef.current = memo.trim();
     start();
+  }
+
+  async function handleImageSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    try {
+      const dataUrl = await compressImage(file);
+      setPendingImage(dataUrl);
+    } catch {
+      setError("사진을 처리하지 못했어요. 다른 사진으로 시도해주세요.");
+    }
   }
 
   useEffect(() => {
@@ -95,9 +118,10 @@ export default function NotePage() {
         setError(data.error ?? "초안을 만들지 못했어요. 다시 시도해주세요.");
         return;
       }
-      const newEntry = addDraftEntry(child!.id, memo, data.result);
+      const newEntry = addDraftEntry(child!.id, memo, data.result, pendingImage ?? undefined);
       setEntry(newEntry);
       setTab("observation");
+      setPendingImage(null);
     } catch {
       setError("초안을 만들지 못했어요. 네트워크 상태를 확인해주세요.");
     } finally {
@@ -120,14 +144,14 @@ export default function NotePage() {
 
   function handleExportText() {
     if (!entry || !child) return;
-    const text = `[관찰일지] ${child.name} (${child.className})\n영역: ${entry.domains
+    const text = `[활동일지] ${child.name} (${child.className})\n날짜: ${formatDate(entry.createdAt)}\n영역: ${entry.domains
       .map((d) => DOMAIN_LABEL[d])
-      .join(", ")}\n\n${entry.observation}\n\n---\n\n[학부모용 알림장]\n\n${entry.parentMessage}`;
+      .join(", ")}\n\n[활동내역]\n${entry.memo}\n\n[관찰한 점]\n${entry.observation}\n\n---\n\n[학부모용 알림장]\n\n${entry.parentMessage}`;
     const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${child.name}_관찰기록_${new Date(entry.createdAt).toISOString().slice(0, 10)}.txt`;
+    a.download = `${child.name}_활동일지_${new Date(entry.createdAt).toISOString().slice(0, 10)}.txt`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -136,7 +160,9 @@ export default function NotePage() {
     window.print();
   }
 
-  const childEntryCount = entries.filter((e) => e.childId === child.id).length;
+  const childEntries = entries
+    .filter((e) => e.childId === child.id)
+    .sort((a, b) => b.createdAt - a.createdAt);
 
   return (
     <>
@@ -148,7 +174,7 @@ export default function NotePage() {
               오늘의 메모 — {child.name}
             </h1>
             <p className="text-xs text-ink/50">
-              {child.className} · 이번 학기 관찰 {childEntryCount}건
+              {child.className} · 이번 학기 관찰 {childEntries.length}건
             </p>
           </div>
           <div className="flex items-center gap-4">
@@ -181,12 +207,25 @@ export default function NotePage() {
               rows={6}
               className="w-full resize-none rounded-lg border border-ink/15 p-4 text-sm leading-[1.7] outline-none transition-shadow focus:border-ink-green focus:ring-2 focus:ring-ink-green/20"
             />
+
+            {pendingImage && (
+              <div className="mt-3 flex items-center gap-3">
+                <div className="relative h-16 w-16 overflow-hidden rounded-lg border border-ink/10">
+                  <Image src={pendingImage} alt="첨부한 활동 사진" fill className="object-cover" />
+                </div>
+                <button
+                  onClick={() => setPendingImage(null)}
+                  className="text-xs text-ink/50 underline hover:text-ink-green"
+                >
+                  사진 제거
+                </button>
+              </div>
+            )}
+
             {error && <p className="mt-2 text-sm text-gold">{error}</p>}
+
             <div className="mt-4 flex flex-wrap items-center gap-2">
-              <Button
-                onClick={handleGenerate}
-                disabled={loading || memo.trim().length === 0}
-              >
+              <Button onClick={handleGenerate} disabled={loading || memo.trim().length === 0}>
                 {loading ? "생성 중…" : "초안 만들기"}
               </Button>
               {voiceSupported && (
@@ -199,6 +238,15 @@ export default function NotePage() {
                   {isListening ? "● 듣고 있어요…" : "🎙 음성으로 입력"}
                 </Button>
               )}
+              <label className="inline-flex cursor-pointer items-center justify-center rounded-lg border border-ink-green px-4 py-2.5 text-sm font-medium text-ink-green hover:bg-accent-soft">
+                📷 사진 첨부
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={handleImageSelect}
+                  className="hidden"
+                />
+              </label>
             </div>
           </div>
 
@@ -260,6 +308,26 @@ export default function NotePage() {
                 </div>
 
                 <Card className="p-5">
+                  <div className="mb-3 flex items-center justify-between">
+                    <p className="text-xs text-ink/50">
+                      {formatDate(entry.createdAt)} · {child.name}
+                    </p>
+                    {entry.status === "saved" && (
+                      <span className="text-xs text-ink-green">저장됨</span>
+                    )}
+                  </div>
+
+                  {entry.imageDataUrl && (
+                    <div className="relative mb-3 h-32 w-full overflow-hidden rounded-lg border border-ink/10">
+                      <Image
+                        src={entry.imageDataUrl}
+                        alt={`${child.name} 활동 사진`}
+                        fill
+                        className="object-cover"
+                      />
+                    </div>
+                  )}
+
                   <div className="mb-3 flex flex-wrap gap-2">
                     {entry.domains.map((d) => (
                       <Badge key={d}>{DOMAIN_LABEL[d]}</Badge>
@@ -268,10 +336,19 @@ export default function NotePage() {
                       <Badge tone="attention">확인 필요</Badge>
                     )}
                   </div>
+
+                  <p className="mb-1 text-xs font-medium text-ink/50">활동내역</p>
+                  <p className="mb-4 rounded-lg bg-accent-soft/40 p-2.5 text-sm leading-[1.6] text-ink/70">
+                    {entry.memo}
+                  </p>
+
+                  <p className="mb-1 text-xs font-medium text-ink/50">
+                    {tab === "observation" ? "관찰한 점" : "학부모용 알림장"}
+                  </p>
                   <textarea
                     value={tab === "observation" ? entry.observation : entry.parentMessage}
                     onChange={(e) => handleFieldChange(tab, e.target.value)}
-                    rows={8}
+                    rows={7}
                     className="w-full resize-none rounded-lg border border-ink/10 bg-accent-soft/30 p-3 text-sm leading-[1.7] outline-none transition-shadow focus:border-ink-green focus:ring-2 focus:ring-ink-green/20"
                   />
                 </Card>
@@ -295,18 +372,70 @@ export default function NotePage() {
           </div>
         </div>
 
+        {childEntries.length > 0 && (
+          <div className="mt-10 border-t border-ink/10 pt-6">
+            <h2 className="font-display mb-4 text-lg font-bold text-ink">
+              이전 기록 ({childEntries.length}건)
+            </h2>
+            <div className="space-y-2">
+              {childEntries.map((e) => (
+                <button
+                  key={e.id}
+                  onClick={() => {
+                    setEntry(e);
+                    setTab("observation");
+                  }}
+                  className={`flex w-full items-center gap-3 rounded-lg border px-4 py-3 text-left transition-colors ${
+                    entry?.id === e.id
+                      ? "border-ink-green bg-accent-soft/40"
+                      : "border-ink/10 hover:border-ink-green/40"
+                  }`}
+                >
+                  {e.imageDataUrl ? (
+                    <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-md">
+                      <Image src={e.imageDataUrl} alt="" fill className="object-cover" />
+                    </div>
+                  ) : (
+                    <div className="h-10 w-10 shrink-0 rounded-md bg-accent-soft" />
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-ink/50">
+                      <span>{formatDate(e.createdAt)}</span>
+                      {e.domains.map((d) => (
+                        <Badge key={d}>{DOMAIN_LABEL[d]}</Badge>
+                      ))}
+                      {e.status === "draft" && <span className="text-gold">확인 필요</span>}
+                    </div>
+                    <p className="truncate text-sm text-ink">{e.memo}</p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {entry && (
           <div id="print-area" className="hidden print:block">
             <h2 className="font-display mb-1 text-2xl font-bold">
-              {child.name} 관찰 기록
+              {child.name} 활동일지
             </h2>
-            <p className="mb-6 text-sm text-ink/60">
-              {child.className} · {new Date(entry.createdAt).toLocaleDateString("ko-KR")} ·{" "}
+            <p className="mb-4 text-sm text-ink/60">
+              {child.className} · {formatDate(entry.createdAt)} ·{" "}
               {entry.domains.map((d) => DOMAIN_LABEL[d]).join(", ")}
             </p>
-            <h3 className="mb-2 text-lg font-bold">관찰일지</h3>
-            <p className="mb-6 whitespace-pre-wrap text-sm leading-[1.7]">{entry.observation}</p>
-            <h3 className="mb-2 text-lg font-bold">학부모용 알림장</h3>
+            {entry.imageDataUrl && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={entry.imageDataUrl}
+                alt=""
+                className="mb-4 max-h-64 rounded-lg object-cover"
+              />
+            )}
+            <h3 className="mb-1 text-base font-bold">활동내역</h3>
+            <p className="mb-4 whitespace-pre-wrap text-sm leading-[1.7]">{entry.memo}</p>
+            <h3 className="mb-1 text-base font-bold">관찰한 점</h3>
+            <p className="mb-4 whitespace-pre-wrap text-sm leading-[1.7]">{entry.observation}</p>
+            <h3 className="mb-1 text-base font-bold">학부모용 알림장</h3>
             <p className="whitespace-pre-wrap text-sm leading-[1.7]">{entry.parentMessage}</p>
           </div>
         )}

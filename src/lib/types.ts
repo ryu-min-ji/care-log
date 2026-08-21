@@ -17,6 +17,7 @@ export interface Entry {
   observation: string;
   parentMessage: string;
   status: EntryStatus;
+  imageDataUrl?: string;
   createdAt: number;
   updatedAt: number;
 }
