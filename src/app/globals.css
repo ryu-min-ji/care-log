@@ -1,0 +1,34 @@
+@import "tailwindcss";
+
+:root {
+  --color-ink-green: #2e5140;
+  --color-gold: #8c6a1e;
+  --color-ink: #1e2a20;
+  --color-paper: #ffffff;
+  --color-accent-soft: #e3eadd;
+}
+
+@theme inline {
+  --color-ink-green: var(--color-ink-green);
+  --color-gold: var(--color-gold);
+  --color-ink: var(--color-ink);
+  --color-paper: var(--color-paper);
+  --color-accent-soft: var(--color-accent-soft);
+  --font-display: var(--font-noto-serif-kr);
+  --font-sans: var(--font-noto-sans-kr);
+  --font-mono: var(--font-noto-mono);
+}
+
+body {
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
