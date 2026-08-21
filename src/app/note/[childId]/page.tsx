@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { Header } from "@/components/Header";
@@ -11,6 +11,7 @@ import { Skeleton } from "@/components/ui/Skeleton";
 import { useCareLogStore } from "@/lib/store";
 import { DOMAIN_LABEL } from "@/lib/domains";
 import { TONES } from "@/lib/tone";
+import { useSpeechToText } from "@/lib/useSpeechToText";
 import type { Entry } from "@/lib/types";
 
 type Tab = "observation" | "parentMessage";
@@ -35,6 +36,22 @@ export default function NotePage() {
   const [error, setError] = useState<string | null>(null);
   const [entry, setEntry] = useState<Entry | null>(null);
   const [tab, setTab] = useState<Tab>("observation");
+
+  const voiceBaseRef = useRef("");
+  const { isSupported: voiceSupported, isListening, start, stop } = useSpeechToText({
+    onResult: (transcript) => {
+      setMemo(voiceBaseRef.current ? `${voiceBaseRef.current} ${transcript}` : transcript);
+    },
+  });
+
+  function handleToggleVoice() {
+    if (isListening) {
+      stop();
+      return;
+    }
+    voiceBaseRef.current = memo.trim();
+    start();
+  }
 
   useEffect(() => {
     if (!loading) {
@@ -165,13 +182,24 @@ export default function NotePage() {
               className="w-full resize-none rounded-lg border border-ink/15 p-4 text-sm leading-[1.7] outline-none transition-shadow focus:border-ink-green focus:ring-2 focus:ring-ink-green/20"
             />
             {error && <p className="mt-2 text-sm text-gold">{error}</p>}
-            <Button
-              onClick={handleGenerate}
-              disabled={loading || memo.trim().length === 0}
-              className="mt-4"
-            >
-              {loading ? "생성 중…" : "초안 만들기"}
-            </Button>
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <Button
+                onClick={handleGenerate}
+                disabled={loading || memo.trim().length === 0}
+              >
+                {loading ? "생성 중…" : "초안 만들기"}
+              </Button>
+              {voiceSupported && (
+                <Button
+                  type="button"
+                  variant={isListening ? "primary" : "secondary"}
+                  onClick={handleToggleVoice}
+                  className={isListening ? "bg-gold hover:bg-gold/90" : ""}
+                >
+                  {isListening ? "● 듣고 있어요…" : "🎙 음성으로 입력"}
+                </Button>
+              )}
+            </div>
           </div>
 
           <div>
