@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { Child, Entry, GenerateResult } from "./types";
+import type { ToneId } from "./tone";
 
 function makeId(): string {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
@@ -9,6 +10,8 @@ function makeId(): string {
 interface CareLogState {
   children: Child[];
   entries: Entry[];
+  tone: ToneId;
+  setTone: (tone: ToneId) => void;
   addChild: (name: string, className: string) => Child;
   addDraftEntry: (childId: string, memo: string, result: GenerateResult) => Entry;
   updateEntry: (id: string, patch: Partial<Pick<Entry, "observation" | "parentMessage">>) => void;
@@ -21,6 +24,8 @@ export const useCareLogStore = create<CareLogState>()(
     (set, get) => ({
       children: [],
       entries: [],
+      tone: "warm",
+      setTone: (tone) => set({ tone }),
       addChild: (name, className) => {
         const child: Child = {
           id: makeId(),

@@ -1,23 +1,28 @@
 import { NextResponse } from "next/server";
 import { DOMAINS, isDomainId, type DomainId } from "@/lib/domains";
 import { mockGenerate } from "@/lib/mockGenerate";
+import { TONE_DESCRIPTION, isToneId, type ToneId } from "@/lib/tone";
 import type { GenerateResult } from "@/lib/types";
 
 const MODEL = "llama-3.3-70b-versatile";
 
-function buildSystemPrompt(): string {
+function buildSystemPrompt(tone: ToneId): string {
   const domainList = DOMAINS.map((d) => `${d.id}(${d.label})`).join(", ");
   return `당신은 보육교사의 짧은 메모를 표준보육과정 기준 관찰일지와 학부모용 알림장으로 바꿔주는 보조 도구입니다.
 반드시 아래 JSON 형식으로만 응답하세요. 다른 텍스트는 절대 포함하지 마세요.
 
 {
   "domains": ["${domainList} 중 해당하는 1~2개의 id"],
-  "observation": "표준보육과정 관찰일지 문체. 관찰 내용과 해석, 다음 지원계획을 포함한 3~4문장의 존댓말 전문 문장",
-  "parentMessage": "학부모가 읽기 편한 다정한 어조의 2~3문장 알림장 문장"
+  "observation": "표준보육과정 관찰일지 문체(${TONE_DESCRIPTION[tone]}). 관찰 내용과 해석, 다음 지원계획을 포함한 3~4문장",
+  "parentMessage": "학부모가 읽기 편한 어조(${TONE_DESCRIPTION[tone]})의 2~3문장 알림장 문장"
 }`;
 }
 
-async function callGroq(childName: string, memo: string): Promise<GenerateResult | null> {
+async function callGroq(
+  childName: string,
+  memo: string,
+  tone: ToneId,
+): Promise<GenerateResult | null> {
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) return null;
 
@@ -33,7 +38,7 @@ async function callGroq(childName: string, memo: string): Promise<GenerateResult
         response_format: { type: "json_object" },
         temperature: 0.6,
         messages: [
-          { role: "system", content: buildSystemPrompt() },
+          { role: "system", content: buildSystemPrompt(tone) },
           {
             role: "user",
             content: `원아 이름: ${childName}\n교사 메모: ${memo}`,
@@ -74,6 +79,7 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => null);
   const childName: string = body?.childName ?? "";
   const memo: string = body?.memo ?? "";
+  const tone: ToneId = isToneId(body?.tone) ? body.tone : "warm";
 
   if (memo.trim().length < 4) {
     return NextResponse.json(
@@ -82,8 +88,8 @@ export async function POST(request: Request) {
     );
   }
 
-  const aiResult = await callGroq(childName, memo);
-  const result = aiResult ?? mockGenerate(childName, memo);
+  const aiResult = await callGroq(childName, memo, tone);
+  const result = aiResult ?? mockGenerate(childName, memo, tone);
 
   return NextResponse.json({ result, source: aiResult ? "ai" : "mock" });
 }

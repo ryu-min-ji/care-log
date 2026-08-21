@@ -8,6 +8,12 @@ export function Header() {
           Care Log
         </Link>
         <nav className="flex items-center gap-6 text-sm text-ink/70">
+          <Link href="/#features" className="hidden hover:text-ink-green sm:inline">
+            기능
+          </Link>
+          <Link href="/#pricing" className="hidden hover:text-ink-green sm:inline">
+            가격
+          </Link>
           <Link href="/class" className="hover:text-ink-green">
             반 관리
           </Link>
