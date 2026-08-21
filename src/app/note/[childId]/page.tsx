@@ -14,12 +14,17 @@ import { DOMAIN_LABEL } from "@/lib/domains";
 import { TONES } from "@/lib/tone";
 import { useSpeechToText } from "@/lib/useSpeechToText";
 import { compressImage } from "@/lib/compressImage";
-import type { Entry } from "@/lib/types";
+import type { DraftEntry } from "@/lib/types";
 
 type Tab = "observation" | "parentMessage";
 
-function formatDate(ts: number) {
-  return new Date(ts).toLocaleDateString("ko-KR", {
+function todayISO() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function formatDateISO(iso: string) {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString("ko-KR", {
     year: "numeric",
     month: "long",
     day: "numeric",
@@ -31,21 +36,22 @@ export default function NotePage() {
   const childId = params.childId;
 
   const children = useCareLogStore((s) => s.children);
-  const addDraftEntry = useCareLogStore((s) => s.addDraftEntry);
+  const addEntry = useCareLogStore((s) => s.addEntry);
   const updateEntry = useCareLogStore((s) => s.updateEntry);
-  const saveEntry = useCareLogStore((s) => s.saveEntry);
   const entries = useCareLogStore((s) => s.entries);
   const tone = useCareLogStore((s) => s.tone);
   const setTone = useCareLogStore((s) => s.setTone);
 
   const child = children.find((c) => c.id === childId);
 
+  const [date, setDate] = useState(todayISO());
   const [memo, setMemo] = useState("");
   const [pendingImage, setPendingImage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [slow, setSlow] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [entry, setEntry] = useState<Entry | null>(null);
+  const [draft, setDraft] = useState<DraftEntry | null>(null);
+  const [viewingId, setViewingId] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("observation");
 
   const voiceBaseRef = useRef("");
@@ -85,6 +91,14 @@ export default function NotePage() {
     return () => clearTimeout(t);
   }, [loading]);
 
+  const childEntries = entries
+    .filter((e) => e.childId === childId)
+    .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : b.createdAt - a.createdAt));
+
+  const viewingEntry = viewingId ? (childEntries.find((e) => e.id === viewingId) ?? null) : null;
+  const displayed = draft ?? viewingEntry;
+  const isUnsaved = draft !== null;
+
   if (!child) {
     return (
       <>
@@ -106,7 +120,8 @@ export default function NotePage() {
     }
     setError(null);
     setLoading(true);
-    setEntry(null);
+    setDraft(null);
+    setViewingId(null);
     try {
       const res = await fetch("/api/generate", {
         method: "POST",
@@ -118,8 +133,14 @@ export default function NotePage() {
         setError(data.error ?? "초안을 만들지 못했어요. 다시 시도해주세요.");
         return;
       }
-      const newEntry = addDraftEntry(child!.id, memo, data.result, pendingImage ?? undefined);
-      setEntry(newEntry);
+      setDraft({
+        date,
+        memo,
+        domains: data.result.domains,
+        observation: data.result.observation,
+        parentMessage: data.result.parentMessage,
+        imageDataUrl: pendingImage ?? undefined,
+      });
       setTab("observation");
       setPendingImage(null);
     } catch {
@@ -130,28 +151,30 @@ export default function NotePage() {
   }
 
   function handleFieldChange(field: "observation" | "parentMessage", value: string) {
-    if (!entry) return;
-    const updated = { ...entry, [field]: value };
-    setEntry(updated);
-    updateEntry(entry.id, { [field]: value });
+    if (draft) {
+      setDraft({ ...draft, [field]: value });
+    } else if (viewingId) {
+      updateEntry(viewingId, { [field]: value });
+    }
   }
 
   function handleSave() {
-    if (!entry) return;
-    saveEntry(entry.id);
-    setEntry({ ...entry, status: "saved" });
+    if (!draft || !child) return;
+    const saved = addEntry(child.id, draft);
+    setDraft(null);
+    setViewingId(saved.id);
   }
 
   function handleExportText() {
-    if (!entry || !child) return;
-    const text = `[활동일지] ${child.name} (${child.className})\n날짜: ${formatDate(entry.createdAt)}\n영역: ${entry.domains
+    if (!displayed || !child) return;
+    const text = `[활동일지] ${child.name} (${child.className})\n날짜: ${formatDateISO(displayed.date)}\n영역: ${displayed.domains
       .map((d) => DOMAIN_LABEL[d])
-      .join(", ")}\n\n[활동내역]\n${entry.memo}\n\n[관찰한 점]\n${entry.observation}\n\n---\n\n[학부모용 알림장]\n\n${entry.parentMessage}`;
+      .join(", ")}\n\n[활동내역]\n${displayed.memo}\n\n[관찰한 점]\n${displayed.observation}\n\n---\n\n[학부모용 알림장]\n\n${displayed.parentMessage}`;
     const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${child.name}_활동일지_${new Date(entry.createdAt).toISOString().slice(0, 10)}.txt`;
+    a.download = `${child.name}_활동일지_${displayed.date}.txt`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -160,19 +183,13 @@ export default function NotePage() {
     window.print();
   }
 
-  const childEntries = entries
-    .filter((e) => e.childId === child.id)
-    .sort((a, b) => b.createdAt - a.createdAt);
-
   return (
     <>
       <Header />
       <main className="mx-auto w-full max-w-4xl flex-1 px-6 py-10">
-        <div className="mb-6 flex items-center justify-between">
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="font-display text-xl font-bold text-ink">
-              오늘의 메모 — {child.name}
-            </h1>
+            <h1 className="font-display text-xl font-bold text-ink">메모 — {child.name}</h1>
             <p className="text-xs text-ink/50">
               {child.className} · 이번 학기 관찰 {childEntries.length}건
             </p>
@@ -200,6 +217,19 @@ export default function NotePage() {
 
         <div className="grid gap-6 md:grid-cols-2">
           <div>
+            <label className="mb-1.5 flex items-center gap-2 text-xs font-medium text-ink/50">
+              활동 날짜
+              <input
+                type="date"
+                value={date}
+                max={todayISO()}
+                onChange={(e) => setDate(e.target.value)}
+                className="rounded-md border border-ink/15 bg-paper px-2 py-1 text-xs text-ink outline-none focus:border-ink-green"
+              />
+              {date !== todayISO() && (
+                <span className="text-gold">오늘이 아니에요 — 몰아서 기록 중이신가요?</span>
+              )}
+            </label>
             <textarea
               value={memo}
               onChange={(e) => setMemo(e.target.value)}
@@ -270,7 +300,7 @@ export default function NotePage() {
               </Card>
             )}
 
-            {!loading && !entry && (
+            {!loading && !displayed && (
               <Card className="flex h-full flex-col items-center justify-center px-6 py-16 text-center">
                 <p className="text-sm text-ink/40">
                   메모를 입력하고 초안을 만들어보세요
@@ -278,7 +308,7 @@ export default function NotePage() {
               </Card>
             )}
 
-            {!loading && entry && (
+            {!loading && displayed && (
               <div>
                 <div role="tablist" aria-label="결과 보기" className="mb-3 flex gap-2">
                   <button
@@ -310,17 +340,15 @@ export default function NotePage() {
                 <Card className="p-5">
                   <div className="mb-3 flex items-center justify-between">
                     <p className="text-xs text-ink/50">
-                      {formatDate(entry.createdAt)} · {child.name}
+                      {formatDateISO(displayed.date)} · {child.name}
                     </p>
-                    {entry.status === "saved" && (
-                      <span className="text-xs text-ink-green">저장됨</span>
-                    )}
+                    {!isUnsaved && <span className="text-xs text-ink-green">저장됨</span>}
                   </div>
 
-                  {entry.imageDataUrl && (
+                  {displayed.imageDataUrl && (
                     <div className="relative mb-3 h-32 w-full overflow-hidden rounded-lg border border-ink/10">
                       <Image
-                        src={entry.imageDataUrl}
+                        src={displayed.imageDataUrl}
                         alt={`${child.name} 활동 사진`}
                         fill
                         className="object-cover"
@@ -329,24 +357,22 @@ export default function NotePage() {
                   )}
 
                   <div className="mb-3 flex flex-wrap gap-2">
-                    {entry.domains.map((d) => (
+                    {displayed.domains.map((d) => (
                       <Badge key={d}>{DOMAIN_LABEL[d]}</Badge>
                     ))}
-                    {entry.status === "draft" && (
-                      <Badge tone="attention">확인 필요</Badge>
-                    )}
+                    {isUnsaved && <Badge tone="attention">확인 필요 · 미저장</Badge>}
                   </div>
 
                   <p className="mb-1 text-xs font-medium text-ink/50">활동내역</p>
                   <p className="mb-4 rounded-lg bg-accent-soft/40 p-2.5 text-sm leading-[1.6] text-ink/70">
-                    {entry.memo}
+                    {displayed.memo}
                   </p>
 
                   <p className="mb-1 text-xs font-medium text-ink/50">
                     {tab === "observation" ? "관찰한 점" : "학부모용 알림장"}
                   </p>
                   <textarea
-                    value={tab === "observation" ? entry.observation : entry.parentMessage}
+                    value={tab === "observation" ? displayed.observation : displayed.parentMessage}
                     onChange={(e) => handleFieldChange(tab, e.target.value)}
                     rows={7}
                     className="w-full resize-none rounded-lg border border-ink/10 bg-accent-soft/30 p-3 text-sm leading-[1.7] outline-none transition-shadow focus:border-ink-green focus:ring-2 focus:ring-ink-green/20"
@@ -354,9 +380,11 @@ export default function NotePage() {
                 </Card>
 
                 <div className="mt-4 flex flex-wrap gap-2">
-                  <Button onClick={handleSave} disabled={entry.status === "saved"}>
-                    {entry.status === "saved" ? "저장됨" : "저장"}
-                  </Button>
+                  {isUnsaved ? (
+                    <Button onClick={handleSave}>확인했어요, 저장</Button>
+                  ) : (
+                    <Button disabled>저장됨</Button>
+                  )}
                   <Button variant="secondary" onClick={handleExportPdf}>
                     PDF로 내보내기
                   </Button>
@@ -365,7 +393,9 @@ export default function NotePage() {
                   </Button>
                 </div>
                 <p className="mt-2 text-xs text-ink/40">
-                  AI가 만든 초안이에요. 저장 전에 내용을 꼭 확인해주세요.
+                  {isUnsaved
+                    ? "AI가 만든 초안이에요. 내용을 확인하고 저장 버튼을 눌러야 기록에 반영돼요."
+                    : "이미 저장된 기록이에요. 내용을 수정하면 바로 반영돼요."}
                 </p>
               </div>
             )}
@@ -382,11 +412,12 @@ export default function NotePage() {
                 <button
                   key={e.id}
                   onClick={() => {
-                    setEntry(e);
+                    setDraft(null);
+                    setViewingId(e.id);
                     setTab("observation");
                   }}
                   className={`flex w-full items-center gap-3 rounded-lg border px-4 py-3 text-left transition-colors ${
-                    entry?.id === e.id
+                    viewingId === e.id && !draft
                       ? "border-ink-green bg-accent-soft/40"
                       : "border-ink/10 hover:border-ink-green/40"
                   }`}
@@ -400,11 +431,10 @@ export default function NotePage() {
                   )}
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2 text-xs text-ink/50">
-                      <span>{formatDate(e.createdAt)}</span>
+                      <span>{formatDateISO(e.date)}</span>
                       {e.domains.map((d) => (
                         <Badge key={d}>{DOMAIN_LABEL[d]}</Badge>
                       ))}
-                      {e.status === "draft" && <span className="text-gold">확인 필요</span>}
                     </div>
                     <p className="truncate text-sm text-ink">{e.memo}</p>
                   </div>
@@ -414,29 +444,29 @@ export default function NotePage() {
           </div>
         )}
 
-        {entry && (
+        {displayed && (
           <div id="print-area" className="hidden print:block">
-            <h2 className="font-display mb-1 text-2xl font-bold">
-              {child.name} 활동일지
-            </h2>
+            <h2 className="font-display mb-1 text-2xl font-bold">{child.name} 활동일지</h2>
             <p className="mb-4 text-sm text-ink/60">
-              {child.className} · {formatDate(entry.createdAt)} ·{" "}
-              {entry.domains.map((d) => DOMAIN_LABEL[d]).join(", ")}
+              {child.className} · {formatDateISO(displayed.date)} ·{" "}
+              {displayed.domains.map((d) => DOMAIN_LABEL[d]).join(", ")}
             </p>
-            {entry.imageDataUrl && (
+            {displayed.imageDataUrl && (
               // eslint-disable-next-line @next/next/no-img-element
               <img
-                src={entry.imageDataUrl}
+                src={displayed.imageDataUrl}
                 alt=""
                 className="mb-4 max-h-64 rounded-lg object-cover"
               />
             )}
             <h3 className="mb-1 text-base font-bold">활동내역</h3>
-            <p className="mb-4 whitespace-pre-wrap text-sm leading-[1.7]">{entry.memo}</p>
+            <p className="mb-4 whitespace-pre-wrap text-sm leading-[1.7]">{displayed.memo}</p>
             <h3 className="mb-1 text-base font-bold">관찰한 점</h3>
-            <p className="mb-4 whitespace-pre-wrap text-sm leading-[1.7]">{entry.observation}</p>
+            <p className="mb-4 whitespace-pre-wrap text-sm leading-[1.7]">
+              {displayed.observation}
+            </p>
             <h3 className="mb-1 text-base font-bold">학부모용 알림장</h3>
-            <p className="whitespace-pre-wrap text-sm leading-[1.7]">{entry.parentMessage}</p>
+            <p className="whitespace-pre-wrap text-sm leading-[1.7]">{displayed.parentMessage}</p>
           </div>
         )}
       </main>

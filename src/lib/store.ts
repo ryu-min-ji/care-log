@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { Child, Entry, GenerateResult } from "./types";
+import type { Child, DraftEntry, Entry } from "./types";
 import type { ToneId } from "./tone";
 
 function makeId(): string {
@@ -13,14 +13,8 @@ interface CareLogState {
   tone: ToneId;
   setTone: (tone: ToneId) => void;
   addChild: (name: string, className: string) => Child;
-  addDraftEntry: (
-    childId: string,
-    memo: string,
-    result: GenerateResult,
-    imageDataUrl?: string,
-  ) => Entry;
+  addEntry: (childId: string, draft: DraftEntry) => Entry;
   updateEntry: (id: string, patch: Partial<Pick<Entry, "observation" | "parentMessage">>) => void;
-  saveEntry: (id: string) => void;
   entriesForChild: (childId: string) => Entry[];
 }
 
@@ -41,17 +35,17 @@ export const useCareLogStore = create<CareLogState>()(
         set((state) => ({ children: [...state.children, child] }));
         return child;
       },
-      addDraftEntry: (childId, memo, result, imageDataUrl) => {
+      addEntry: (childId, draft) => {
         const now = Date.now();
         const entry: Entry = {
           id: makeId(),
           childId,
-          memo,
-          domains: result.domains,
-          observation: result.observation,
-          parentMessage: result.parentMessage,
-          status: "draft",
-          imageDataUrl,
+          date: draft.date,
+          memo: draft.memo,
+          domains: draft.domains,
+          observation: draft.observation,
+          parentMessage: draft.parentMessage,
+          imageDataUrl: draft.imageDataUrl,
           createdAt: now,
           updatedAt: now,
         };
@@ -62,13 +56,6 @@ export const useCareLogStore = create<CareLogState>()(
         set((state) => ({
           entries: state.entries.map((e) =>
             e.id === id ? { ...e, ...patch, updatedAt: Date.now() } : e,
-          ),
-        }));
-      },
-      saveEntry: (id) => {
-        set((state) => ({
-          entries: state.entries.map((e) =>
-            e.id === id ? { ...e, status: "saved", updatedAt: Date.now() } : e,
           ),
         }));
       },

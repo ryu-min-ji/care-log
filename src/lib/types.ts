@@ -7,16 +7,14 @@ export interface Child {
   createdAt: number;
 }
 
-export type EntryStatus = "draft" | "saved";
-
 export interface Entry {
   id: string;
   childId: string;
+  date: string;
   memo: string;
   domains: DomainId[];
   observation: string;
   parentMessage: string;
-  status: EntryStatus;
   imageDataUrl?: string;
   createdAt: number;
   updatedAt: number;
@@ -26,4 +24,13 @@ export interface GenerateResult {
   domains: DomainId[];
   observation: string;
   parentMessage: string;
+}
+
+export interface DraftEntry {
+  date: string;
+  memo: string;
+  domains: DomainId[];
+  observation: string;
+  parentMessage: string;
+  imageDataUrl?: string;
 }
