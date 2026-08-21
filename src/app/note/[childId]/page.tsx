@@ -93,6 +93,7 @@ export default function NotePage() {
 
   const childEntries = entries
     .filter((e) => e.childId === childId)
+    .map((e) => (e.date ? e : { ...e, date: new Date(e.createdAt).toISOString().slice(0, 10) }))
     .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : b.createdAt - a.createdAt));
 
   const viewingEntry = viewingId ? (childEntries.find((e) => e.id === viewingId) ?? null) : null;
